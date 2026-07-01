@@ -13,7 +13,10 @@
 6. [JSX](#6-jsx)
 7. [Rendering: createRoot & render](#7-rendering-createroot--render)
 8. [Components](#8-components)
-9. [Rules & Gotchas (Quick Reference)](#9-rules--gotchas-quick-reference)
+9. [State & the useState Hook](#9-state--the-usestate-hook)
+10. [Handling Events](#10-handling-events)
+11. [Updating State: Batching & the Updater Function](#11-updating-state-batching--the-updater-function)
+12. [Rules & Gotchas (Quick Reference)](#12-rules--gotchas-quick-reference)
 
 ---
 
@@ -334,7 +337,121 @@ There is a subtle related point from the `main.jsx` experiments:
 
 ---
 
-## 9. Rules & Gotchas (Quick Reference)
+## 9. State & the useState Hook
+
+Up to now components rendered **static** data. Real UIs change — a counter, a form,
+a toggle. **State** is data that a component "remembers" between renders, and when it
+changes, React **re-renders** the component to reflect the new value.
+
+This section maps to the `2.Counter/` app.
+
+### Why a normal variable does NOT work
+
+```jsx
+let counter = 0        // ❌ NOT state
+const addValue = () => { counter = counter + 1 }
+```
+A plain variable *does* change in memory, but React has **no idea** it changed, so it
+never re-renders — the UI stays stuck on the old value. React only re-renders when
+**state** changes.
+
+### The useState hook
+
+```jsx
+import { useState } from 'react'
+
+function App() {
+  const [counter, setCounter] = useState(0)  // [ value, setter ], initial value 0
+  ...
+}
+```
+
+`useState` returns an **array of two things** (we destructure them):
+| Part | Name | Purpose |
+|------|------|---------|
+| `counter` | the **state variable** | the current value — read this to display it |
+| `setCounter` | the **setter function** | the ONLY correct way to change the value |
+| `useState(0)` | — | the argument is the **initial value** (used on first render only) |
+
+**Rules of thumb:**
+- Never reassign the state variable directly (`counter = 5` ❌). Always go through the
+  setter (`setCounter(5)` ✅) so React knows to re-render.
+- The naming convention is `[thing, setThing]`.
+- When state updates, React re-renders the component and **every place** that uses the
+  variable updates together — in the counter app, both `Counter Value : {counter}` and
+  `Footer : {counter}` change at once. This shows the "UI = function of state" idea:
+  one source of truth drives the whole view.
+
+> **Hooks** are special functions that start with `use` and let function components
+> "hook into" React features (state, lifecycle, etc.). `useState` is the first one.
+
+---
+
+## 10. Handling Events
+
+React elements accept event handlers as **camelCase props** that take a function:
+
+```jsx
+<button onClick={addValue}>Add Value</button>
+```
+
+- `onClick` (camelCase) — not `onclick` like plain HTML.
+- The value is a **function reference**, not a call: `onClick={addValue}` ✅,
+  **not** `onClick={addValue()}` ❌ (the second one runs immediately on render).
+
+### Inline arrow functions
+When you need to pass an argument or run a small bit of logic, use an inline arrow:
+
+```jsx
+<button onClick={() => { setCounter(counter - 1) }}>Remove Value</button>
+```
+The arrow function wraps the code so it only runs **when clicked**, not during render.
+
+---
+
+## 11. Updating State: Batching & the Updater Function
+
+This is the key lesson of the counter app. Look at `addValue`:
+
+```jsx
+const addValue = () => {
+  setCounter(counter + 1)
+  setCounter(counter + 1)
+  setCounter(counter + 1)
+  setCounter(counter + 1)   // expected +4... but the counter only goes up by 1
+}
+```
+
+### Why it only adds 1 — batching
+React **batches** multiple state updates that happen in the same event handler for
+performance (it re-renders once, not four times). During this handler, `counter` is a
+**snapshot** — it stays `0` for the whole function. So all four calls compute
+`0 + 1 = 1`, and React applies the final `1`. Result: **+1, not +4.**
+
+### The fix — pass an updater function
+Instead of passing a value, pass a **function** that receives the latest pending state:
+
+```jsx
+const addValue = () => {
+  setCounter((prevCounter) => prevCounter + 1)
+  setCounter((prevCounter) => prevCounter + 1)   // now this really adds up
+}
+```
+Here each call gets the **previous** value from React's queue rather than the stale
+snapshot, so two calls give `+2`. Chain more for `+3`, `+4`, etc.
+
+**Rule of thumb:** whenever the new state depends on the **old** state, use the
+updater-function form `setX(prev => ...)`. It is always safe. Passing a raw value
+(`setX(x + 1)`) is fine only for a single, standalone update.
+
+| Form | Example | When to use |
+|------|---------|-------------|
+| Value | `setCounter(counter + 1)` | one update, not dependent on chained updates |
+| Updater fn | `setCounter(prev => prev + 1)` | when new value depends on previous / multiple updates |
+
+---
+
+## 12. Rules & Gotchas (Quick Reference)
 
 | Rule | Detail |
 |------|--------|
@@ -347,8 +464,13 @@ There is a subtle related point from the `main.jsx` experiments:
 | Entry point | `index.html` → `main.jsx` → `createRoot('#root').render(<App />)`. |
 | SPA | The whole app lives inside one `#root` div in a single HTML page. |
 | JSX is sugar | Compiles down to `React.createElement()` calls. |
+| State, not variables | UI only updates when **state** changes; use `useState`, never a plain variable. |
+| Update via setter | Change state with `setX(...)`, never by reassigning the variable. |
+| Events are camelCase | `onClick={fn}` — pass a reference, not `onClick={fn()}`. |
+| Batching | Multiple `setX(value)` in one handler use a stale snapshot → applied once. |
+| Updater function | Use `setX(prev => ...)` when new state depends on the old value. |
 
 ---
 
-*More sections will be appended as the course continues (props, hooks like useState
-& useEffect, events, conditional rendering, lists & keys, etc.).*
+*More sections will be appended as the course continues (props, useEffect, useRef,
+conditional rendering, lists & keys, forms, etc.).*
