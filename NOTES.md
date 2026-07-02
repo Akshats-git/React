@@ -203,6 +203,29 @@ these element objects). When state changes, React builds a new virtual tree, com
 it with the previous one (**diffing / reconciliation**), and updates only the changed
 parts of the real DOM. Direct DOM manipulation is slow; this makes React fast.
 
+### Reconciliation & Diffing (short version)
+
+- **Reconciliation** is the overall process React uses to figure out *what changed*
+  between the old virtual tree and the new one, and then apply the minimum set of
+  updates to the real DOM.
+- **Diffing** is the algorithm inside reconciliation that actually **compares the two
+  trees**. Comparing two trees perfectly is expensive (O(n³)), so React uses a fast
+  **O(n) heuristic** based on two assumptions:
+  1. **Different element types produce different trees.** If a `<div>` becomes a
+     `<span>`, React tears down the old node and builds a new one (doesn't try to reuse).
+  2. **`key` props tell React which items are stable** across renders. This is why lists
+     need a stable, unique `key` — it lets React match old and new items instead of
+     re-creating them.
+- **Only the differences get committed** to the real DOM — unchanged nodes are left
+  alone. This is what makes updates cheap.
+- **Fiber** is the current reconciliation engine (React 16+). It lets React split
+  rendering work into small units, **pause/resume/prioritize** it, so heavy updates
+  don't block the browser. The older engine (the "stack reconciler") did all the work
+  synchronously in one go.
+
+> 📚 **Deep dive:** [react-fiber-architecture (acdlite)](https://github.com/acdlite/react-fiber-architecture)
+> — an excellent explainer of how React's Fiber reconciler works under the hood.
+
 ---
 
 ## 6. JSX
