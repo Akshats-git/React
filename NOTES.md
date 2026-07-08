@@ -16,7 +16,9 @@
 9. [State & the useState Hook](#9-state--the-usestate-hook)
 10. [Handling Events](#10-handling-events)
 11. [Updating State: Batching & the Updater Function](#11-updating-state-batching--the-updater-function)
-12. [Rules & Gotchas (Quick Reference)](#12-rules--gotchas-quick-reference)
+12. [Props: Passing Data to Components](#12-props-passing-data-to-components)
+13. [Styling with Tailwind CSS (v4)](#13-styling-with-tailwind-css-v4)
+14. [Rules & Gotchas (Quick Reference)](#14-rules--gotchas-quick-reference)
 
 ---
 
@@ -474,7 +476,116 @@ updater-function form `setX(prev => ...)`. It is always safe. Passing a raw valu
 
 ---
 
-## 12. Rules & Gotchas (Quick Reference)
+## 12. Props: Passing Data to Components
+
+**Props** (short for *properties*) are how a parent component passes data **down** to a
+child component. They make components **reusable** — the same component renders
+different content depending on the props it receives. This section maps to the
+`3.TailwindProps/` app (`App.jsx` + `components/Card.jsx`).
+
+### Passing props (parent side)
+You pass props like HTML attributes on the component tag:
+
+```jsx
+<Card username="Makime" animename="Chainsaw Man" />
+<Card />   {/* no props passed — child will fall back to defaults */}
+```
+
+- **Strings** go in quotes: `username="Makime"`.
+- **Anything else** (numbers, arrays, objects, expressions) goes in **curly braces**:
+  ```jsx
+  <Card username={["Makime", "Akaza"]} animename="Chainsaw Man" />   {/* array  */}
+  <Card username={{ name: "Makime", age: 25 }} animename="Chainsaw Man" />   {/* object */}
+  ```
+
+### Receiving props (child side)
+Every component automatically receives a single `props` object holding all the values:
+
+```jsx
+function Card(props) {
+  return <span>{props.username}</span>   // access via props.<name>
+}
+```
+For a passed array/object you'd read `props.username[0]` or `props.username.name`.
+
+### Destructuring props + default values (preferred)
+Instead of writing `props.` everywhere, destructure the props right in the parameter
+list. You can also give each prop a **default value** used when the parent doesn't pass
+one:
+
+```jsx
+function Card({ username = "Akaza", animename = "Kimetsu no Yaiba" }) {
+  return (
+    <>
+      <span>{username}</span>
+      <span>{animename}</span>
+    </>
+  )
+}
+```
+
+- `<Card username="Makime" animename="Chainsaw Man" />` → shows *Makime / Chainsaw Man*.
+- `<Card />` → falls back to defaults → *Akaza / Kimetsu no Yaiba*.
+
+**Key points about props:**
+- Props flow **one way**: parent → child (**"unidirectional data flow"**).
+- Props are **read-only** — a child must **never** modify its own props. If data needs
+  to change, that's what **state** is for (in the parent).
+- Destructuring with defaults is the clean, common pattern.
+
+---
+
+## 13. Styling with Tailwind CSS (v4)
+
+**Tailwind CSS** is a **utility-first** CSS framework: instead of writing custom CSS
+classes, you compose small single-purpose classes directly in your JSX `className`.
+
+```jsx
+<h1 className="text-3xl font-bold bg-blue-500 text-white p-2">Vite with Tailwind</h1>
+<div className="flex flex-col items-center p-7 rounded-2xl"> ... </div>
+<img className="size-48 shadow-xl rounded-md" src="..." alt="" />
+```
+
+Each class does one thing:
+| Class | Effect |
+|-------|--------|
+| `text-3xl` | font size | 
+| `font-bold` | bold weight |
+| `bg-blue-500` | blue background |
+| `text-white` | white text |
+| `p-2` / `p-7` | padding |
+| `flex flex-col` | flexbox, column direction |
+| `items-center` | center items on cross axis |
+| `gap-2` | spacing between flex children |
+| `rounded-2xl` / `rounded-md` | rounded corners |
+| `size-48` | fixed width + height |
+| `shadow-xl` | large drop shadow |
+
+### Setup (Tailwind v4 + Vite)
+This project uses **Tailwind v4**, which is much simpler than v3 (no `tailwind.config.js`
+or PostCSS setup needed):
+
+1. Install: `npm install tailwindcss @tailwindcss/vite`
+2. Add the plugin in `vite.config.js`:
+   ```js
+   import tailwindcss from '@tailwindcss/vite'
+   export default defineConfig({
+     plugins: [react(), tailwindcss()],
+   })
+   ```
+3. Import Tailwind once in your CSS entry (`index.css`):
+   ```css
+   @import "tailwindcss";
+   ```
+   > In v4 this **single line** replaces the old `@tailwind base/components/utilities`
+   > directives from v3.
+
+**Why utility-first:** you style without leaving your JSX, class names are consistent,
+and unused styles are stripped in the production build — so the shipped CSS stays small.
+
+---
+
+## 14. Rules & Gotchas (Quick Reference)
 
 | Rule | Detail |
 |------|--------|
@@ -492,8 +603,12 @@ updater-function form `setX(prev => ...)`. It is always safe. Passing a raw valu
 | Events are camelCase | `onClick={fn}` — pass a reference, not `onClick={fn()}`. |
 | Batching | Multiple `setX(value)` in one handler use a stale snapshot → applied once. |
 | Updater function | Use `setX(prev => ...)` when new state depends on the old value. |
+| Props are read-only | A child must never modify its props; data flows parent → child. |
+| Passing props | Strings use quotes; arrays/objects/expressions use `{ }`. |
+| Prop defaults | Destructure with defaults: `function Card({ name = "..." })`. |
+| Tailwind classes | Utility-first styling via `className`; v4 needs only `@import "tailwindcss";`. |
 
 ---
 
-*More sections will be appended as the course continues (props, useEffect, useRef,
-conditional rendering, lists & keys, forms, etc.).*
+*More sections will be appended as the course continues (useEffect, useRef,
+conditional rendering, lists & keys, forms, custom hooks, etc.).*
