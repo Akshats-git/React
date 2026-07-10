@@ -18,7 +18,8 @@
 11. [Updating State: Batching & the Updater Function](#11-updating-state-batching--the-updater-function)
 12. [Props: Passing Data to Components](#12-props-passing-data-to-components)
 13. [Styling with Tailwind CSS (v4)](#13-styling-with-tailwind-css-v4)
-14. [Rules & Gotchas (Quick Reference)](#14-rules--gotchas-quick-reference)
+14. [Inline Styles & Passing Arguments to Event Handlers](#14-inline-styles--passing-arguments-to-event-handlers)
+15. [Rules & Gotchas (Quick Reference)](#15-rules--gotchas-quick-reference)
 
 ---
 
@@ -585,7 +586,63 @@ and unused styles are stripped in the production build — so the shipped CSS st
 
 ---
 
-## 14. Rules & Gotchas (Quick Reference)
+## 14. Inline Styles & Passing Arguments to Event Handlers
+
+This section maps to the `4.BgChanger/` app — a page whose background color changes
+when you click a button. It ties together **state**, **events**, and **inline styles**.
+
+### Inline styles in JSX — the double curly braces
+
+```jsx
+<div className="w-full h-screen duration-200" style={{ backgroundColor: color }}>
+```
+
+- `style` in JSX takes a **JavaScript object**, not a CSS string.
+- That's why you see **two** braces: the **outer** `{ }` embeds a JS expression into
+  JSX, and the **inner** `{ }` is the object literal itself → `style={{ ... }}`.
+- CSS property names are **camelCase**: `backgroundColor` (not `background-color`),
+  `fontSize`, `marginTop`, etc.
+- Values are strings/numbers: `{ backgroundColor: color }` uses the state variable, so
+  the style is **driven by state** — change `color` and the div restyles automatically.
+
+> `className` is for static classes (Tailwind here: `w-full h-screen duration-200`);
+> `style` is handy for **dynamic** values coming from state/props.
+
+### Driving styles from state
+The whole app is "UI = function of state" again:
+
+```jsx
+const [color, setColor] = useState('olive')   // initial background
+// ...
+<div style={{ backgroundColor: color }}>      // reads the state
+```
+When `setColor(...)` runs, `color` changes → React re-renders → the inline style updates
+→ the background changes. The Tailwind `duration-200` class makes it animate smoothly.
+
+### Passing arguments to an event handler
+`onClick` needs a **function reference**. To also pass an argument, wrap the call in an
+**inline arrow function** so it runs only on click:
+
+```jsx
+<button onClick={() => handleColorChange('red')}>Red</button>   // ✅ arrow wrapper
+```
+
+- `onClick={handleColorChange('red')}` ❌ would call it **immediately** during render.
+- `onClick={() => handleColorChange('red')}` ✅ defers it until the click, passing `'red'`.
+
+You can call the setter directly or go through a handler — both appear in the app and
+are equivalent:
+
+```jsx
+<button onClick={() => setColor('blue')}>Blue</button>              // direct
+<button onClick={() => handleColorChange('green')}>Green</button>   // via handler
+```
+A named handler is useful when there's extra logic; calling the setter inline is fine
+for a one-liner.
+
+---
+
+## 15. Rules & Gotchas (Quick Reference)
 
 | Rule | Detail |
 |------|--------|
@@ -607,6 +664,9 @@ and unused styles are stripped in the production build — so the shipped CSS st
 | Passing props | Strings use quotes; arrays/objects/expressions use `{ }`. |
 | Prop defaults | Destructure with defaults: `function Card({ name = "..." })`. |
 | Tailwind classes | Utility-first styling via `className`; v4 needs only `@import "tailwindcss";`. |
+| Inline styles | `style={{ camelCaseProp: value }}` — an object, double braces, camelCase keys. |
+| Dynamic vs static styles | `style` for state/prop-driven values; `className` for static classes. |
+| Args to handlers | Wrap in an arrow: `onClick={() => fn(arg)}`, never `onClick={fn(arg)}`. |
 
 ---
 
