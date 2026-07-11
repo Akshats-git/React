@@ -19,7 +19,11 @@
 12. [Props: Passing Data to Components](#12-props-passing-data-to-components)
 13. [Styling with Tailwind CSS (v4)](#13-styling-with-tailwind-css-v4)
 14. [Inline Styles & Passing Arguments to Event Handlers](#14-inline-styles--passing-arguments-to-event-handlers)
-15. [Rules & Gotchas (Quick Reference)](#15-rules--gotchas-quick-reference)
+15. [The useEffect Hook (Side Effects)](#15-the-useeffect-hook-side-effects)
+16. [The useCallback Hook (Memoizing Functions)](#16-the-usecallback-hook-memoizing-functions)
+17. [The useRef Hook (Referencing DOM Nodes)](#17-the-useref-hook-referencing-dom-nodes)
+18. [Controlled Inputs & Reading Form Values](#18-controlled-inputs--reading-form-values)
+19. [Rules & Gotchas (Quick Reference)](#19-rules--gotchas-quick-reference)
 
 ---
 
@@ -642,7 +646,143 @@ for a one-liner.
 
 ---
 
-## 15. Rules & Gotchas (Quick Reference)
+## 15. The useEffect Hook (Side Effects)
+
+The next four sections all map to the `5.PasswordGenerator/` app, which brings three new
+hooks together. This app also uses **all three** so it's a good place to see how they
+cooperate.
+
+A **side effect** is anything that reaches **outside** the pure "render UI from state"
+job — timers, subscriptions, fetching data, manually touching the DOM, or (here)
+**re-running logic when some state changes**. `useEffect` lets you run code *after*
+render, in response to changes.
+
+```jsx
+useEffect(() => {
+  generatePassword()          // effect: regenerate the password
+}, [length, numberAllowed, charAllowed])   // dependency array
+```
+
+**The dependency array is the key part:**
+| Dependency array | When the effect runs |
+|------------------|----------------------|
+| `[a, b]` | after the first render **and** whenever `a` or `b` changes |
+| `[]` (empty) | **once**, after the first render only (mount) |
+| *omitted* | after **every** render (rarely what you want) |
+
+In the password app: whenever the user changes the **length**, or toggles **numbers**
+or **special characters**, the effect fires and regenerates the password automatically —
+no button press needed.
+
+> **Cleanup (mentioned for later):** an effect can `return` a function that React runs
+> before the next effect / on unmount — used to clear timers, remove listeners, etc.
+
+---
+
+## 16. The useCallback Hook (Memoizing Functions)
+
+In JavaScript, a function defined inside a component is **re-created on every render** (a
+brand-new function object each time). `useCallback` **memoizes** the function — it hands
+back the **same** function instance between renders, and only rebuilds it when one of its
+dependencies changes.
+
+```jsx
+const generatePassword = useCallback(() => {
+  let pass = ""
+  let str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+  if (numberAllowed) str += "0123456789"
+  if (charAllowed)   str += "!@#$%^&*()_+"
+  for (let i = 1; i < length; i++) {
+    const char = Math.floor(Math.random() * str.length + 1)
+    pass += str.charAt(char)
+  }
+  setPassword(pass)
+}, [length, numberAllowed, charAllowed])   // deps: rebuild only if these change
+```
+
+- **Signature:** `useCallback(fn, [dependencies])`.
+- **Why it matters here:** `generatePassword` is listed in `useEffect`'s logic and
+  depends on `length`, `numberAllowed`, `charAllowed`. Memoizing keeps a stable
+  reference and ensures the latest values are captured (the deps match the effect's).
+- **When to use:** as an optimization — when a function is a dependency of another hook,
+  or passed to memoized child components. Don't wrap every function; use it when a stable
+  identity actually matters.
+
+> Note the `for` loop starts at `i = 1`, so the generated password is `length - 1`
+> characters — a small off-by-one worth being aware of.
+
+---
+
+## 17. The useRef Hook (Referencing DOM Nodes)
+
+`useRef` gives you a **mutable container** (`{ current: ... }`) that **persists across
+renders** and, unlike state, **does not trigger a re-render** when you change it. Its most
+common use is getting a **direct reference to a DOM element**.
+
+```jsx
+const passwordRef = useRef(null)          // 1. create the ref
+// ...
+<input ref={passwordRef} value={password} readOnly />   // 2. attach via ref={}
+// ...
+const copyPasswordToClipboard = () => {
+  window.navigator.clipboard.writeText(password)
+  passwordRef.current?.select()           // 3. use the real DOM node
+}
+```
+
+- `useRef(null)` creates the ref; React fills `.current` with the DOM node once it mounts.
+- `ref={passwordRef}` wires the ref to the JSX element.
+- `passwordRef.current` is then the actual `<input>` DOM node — here `.select()`
+  highlights its text when you click **copy**.
+- The `?.` (optional chaining) guards against `current` being `null`.
+
+**useState vs useRef:** both persist values across renders, but changing **state**
+re-renders the component, while changing a **ref** does **not**. Use a ref for values you
+want to remember but that shouldn't drive the UI (like a DOM handle).
+
+---
+
+## 18. Controlled Inputs & Reading Form Values
+
+An input is **controlled** when its value comes from React **state** — React is the
+"single source of truth", not the DOM. You wire it with `value={state}` +
+`onChange={...}`.
+
+### Range slider (controlled)
+```jsx
+<input
+  type="range" min={6} max={100}
+  value={length}
+  onChange={(e) => setLength(e.target.value)}
+/>
+<label>Length: {length}</label>
+```
+- `value={length}` binds the slider to state.
+- `onChange` fires on every move; `e.target.value` is the new value → pushed into state.
+
+### Checkboxes (toggling boolean state)
+```jsx
+<input
+  type="checkbox"
+  defaultChecked={numberAllowed}
+  onChange={() => setNumberAllowed((prev) => !prev)}
+/>
+```
+- For checkboxes the meaningful value is **checked**, so `onChange` flips the boolean
+  with the updater form `setX(prev => !prev)` (depends on previous state → updater fn,
+  from Section 11).
+
+**Key idea:** the UI and the state stay in sync automatically. Changing any input updates
+state → (via `useEffect`) regenerates the password → the read-only output field reflects
+it. That's the whole app wired together: **state + effect + refs + controlled inputs**.
+
+> **`value` + `readOnly`:** the output `<input>` uses `value={password} readOnly` so it
+> displays state but can't be typed into. A controlled `value` without `onChange` needs
+> `readOnly` to avoid a React warning.
+
+---
+
+## 19. Rules & Gotchas (Quick Reference)
 
 | Rule | Detail |
 |------|--------|
@@ -667,8 +807,14 @@ for a one-liner.
 | Inline styles | `style={{ camelCaseProp: value }}` — an object, double braces, camelCase keys. |
 | Dynamic vs static styles | `style` for state/prop-driven values; `className` for static classes. |
 | Args to handlers | Wrap in an arrow: `onClick={() => fn(arg)}`, never `onClick={fn(arg)}`. |
+| `useEffect` | Runs code after render; `[deps]` control when — `[]` = once on mount. |
+| `useCallback` | Memoizes a function so its identity is stable across renders; `useCallback(fn, [deps])`. |
+| `useRef` | Persistent `{ current }` box that survives renders **without** re-rendering; used for DOM refs. |
+| ref → DOM | `const r = useRef(null)` → `ref={r}` → use `r.current` (guard with `?.`). |
+| Controlled input | `value={state}` + `onChange` — React state is the source of truth. |
+| `value` + `readOnly` | A controlled `value` with no `onChange` needs `readOnly` to silence React's warning. |
 
 ---
 
-*More sections will be appended as the course continues (useEffect, useRef,
-conditional rendering, lists & keys, forms, custom hooks, etc.).*
+*More sections will be appended as the course continues (custom hooks, useMemo,
+Context API, conditional rendering, lists & keys, React Router, etc.).*
