@@ -29,7 +29,12 @@
 22. [Forms: onSubmit & preventDefault](#22-forms-onsubmit--preventdefault)
 23. [Callback Props & Barrel Exports](#23-callback-props--barrel-exports)
 24. [Rules of Hooks](#24-rules-of-hooks)
-25. [Rules & Gotchas (Quick Reference)](#25-rules--gotchas-quick-reference)
+25. [React Router: Setup & Routing](#25-react-router-setup--routing)
+26. [Layouts & the Outlet](#26-layouts--the-outlet)
+27. [Navigation: Link & NavLink](#27-navigation-link--navlink)
+28. [Dynamic Routes & useParams](#28-dynamic-routes--useparams)
+29. [Loaders & useLoaderData](#29-loaders--useloaderdata)
+30. [Rules & Gotchas (Quick Reference)](#30-rules--gotchas-quick-reference)
 
 ---
 
@@ -1073,7 +1078,255 @@ custom ones):
 
 ---
 
-## 25. Rules & Gotchas (Quick Reference)
+## 25. React Router: Setup & Routing
+
+Sections 25–29 map to the `7.ReactRouter/` app. Until now every project was a **single
+page**. **React Router** adds **client-side routing**: multiple URLs (`/`, `/about`,
+`/github`) that swap components **without a full page reload** — keeping the SPA benefit
+(Section 3) while having real, shareable, bookmarkable URLs.
+
+It's **not** part of React — it's a separate library:
+```bash
+npm install react-router-dom
+```
+
+### Two ways to define routes
+**Object syntax** — routes as a plain nested array:
+```jsx
+const router = createBrowserRouter([
+  {
+    path: '/',
+    element: <Layout />,
+    children: [
+      { path: "",        element: <Home /> },
+      { path: "about",   element: <About /> },
+      { path: "contact", element: <Contact /> },
+    ]
+  }
+])
+```
+
+**JSX syntax** — the same thing written as `<Route>` elements (what this app uses):
+```jsx
+const router = createBrowserRouter(
+  createRoutesFromElements(
+    <Route path='/' element={<Layout />}>
+      <Route path=''             element={<Home />} />
+      <Route path='about'        element={<About />} />
+      <Route path='contact'      element={<Contact />} />
+      <Route path='user/:userid' element={<User />} />
+      <Route path='github' element={<Github />} loader={githubInfoLoader} />
+    </Route>
+  )
+)
+```
+`createRoutesFromElements` converts the JSX tree into that same object array — **pick
+whichever you find readable**, they're identical in behavior.
+
+### Wiring it up in `main.jsx`
+```jsx
+import { RouterProvider, createBrowserRouter } from 'react-router-dom'
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <RouterProvider router={router} />
+  </React.StrictMode>,
+)
+```
+- `createBrowserRouter(...)` builds the router (uses the browser's History API for clean
+  URLs — no `#`).
+- `<RouterProvider router={router} />` renders whatever matches the current URL.
+
+**Note the structural shift:** `main.jsx` now renders `<RouterProvider />` **instead of**
+`<App />`. The router is the new root — `App.jsx` is left over from the Vite template and
+is **no longer used** in this project.
+
+### Nested routes: how paths combine
+Child paths are **relative** and append to the parent:
+| `<Route>` | Resulting URL |
+|-----------|---------------|
+| parent `path='/'` | `/` |
+| child `path=''` (**index**) | `/` — the default child, shown at the parent's exact path |
+| child `path='about'` | `/about` |
+| child `path='user/:userid'` | `/user/akshat` |
+
+Child paths **don't** start with `/` — a leading slash makes the path absolute and breaks
+nesting.
+
+> **Migration note:** this project was scaffolded with older versions (React 18, Vite 4,
+> **Tailwind v3**) and was upgraded to match projects 3–6 (React 19, Vite 8, **Tailwind
+> v4**). Moving Tailwind v3 → v4 meant: deleting `tailwind.config.js` and
+> `postcss.config.js`, replacing the three `@tailwind base/components/utilities`
+> directives in `index.css` with the single `@import "tailwindcss";`, and adding the
+> `@tailwindcss/vite` plugin (Section 13). The **utility classes didn't change** — only
+> the configuration. React Router was also bumped to **v7**, since v6 predates React 19;
+> the imports and APIs in this app are unchanged between v6 and v7.
+
+---
+
+## 26. Layouts & the Outlet
+
+Most sites keep a **header and footer** on every page and swap only the middle. That's a
+**layout route**: a parent route whose element renders the shared shell.
+
+```jsx
+// Layout.jsx
+import { Outlet } from 'react-router-dom'
+
+function Layout() {
+  return (
+    <>
+      <Header />
+      <Outlet />     {/* ← the matched child route renders HERE */}
+      <Footer />
+    </>
+  )
+}
+```
+
+- `<Outlet />` is a **placeholder** for the child route's element.
+- Navigate to `/about` → the router renders `<Layout />`, and `<Outlet />` becomes
+  `<About />`. Header and Footer **stay mounted** and don't re-render from scratch.
+- This is why routes are nested: `<Route path='/' element={<Layout />}>` wraps all the
+  children.
+
+**Mental model:** `Outlet` is to routing what `children` is to a normal wrapper component
+— a hole for content decided by the router.
+
+---
+
+## 27. Navigation: Link & NavLink
+
+### Never use `<a>` for internal links
+```jsx
+<a href="/about">About</a>          {/* ❌ full page reload — kills the SPA */}
+<Link to="/about">About</Link>      {/* ✅ client-side, instant, keeps state */}
+```
+A plain `<a>` makes the browser **request a new document**, reloading the whole app and
+wiping React state. `Link` intercepts the click and just swaps components.
+
+- Note the prop is **`to`**, not `href`.
+- Use `<a>` only for **external** URLs.
+
+### NavLink — a Link that knows if it's active
+`NavLink` is `Link` plus awareness of whether its route is currently active — perfect for
+highlighting the current nav item:
+
+```jsx
+<NavLink
+  to="/about"
+  className={({ isActive }) =>
+    `block py-2 duration-200 ${isActive ? "text-orange-700" : "text-gray-700"} hover:text-orange-700`
+  }
+>
+  About
+</NavLink>
+```
+
+- `className` can be a **function** receiving `{ isActive }` and returning the class
+  string. (`style` accepts a function too.)
+- Here the active link turns **orange**; inactive links stay gray.
+- `NavLink` also adds an `active` class automatically if you pass a plain string.
+
+> **Gotcha:** `to="#"` (used by the Log in / Get started buttons here) is a placeholder —
+> it doesn't navigate anywhere. Fine as a stub, but swap in real routes later.
+
+---
+
+## 28. Dynamic Routes & useParams
+
+A **dynamic segment** is a placeholder in the path, written with a **colon**:
+
+```jsx
+<Route path='user/:userid' element={<User />} />
+```
+This one route matches `/user/akshat`, `/user/123`, `/user/anything` — and captures that
+segment as **`userid`**.
+
+Read it with the **`useParams`** hook:
+```jsx
+import { useParams } from 'react-router-dom'
+
+function User() {
+  const { userid } = useParams()      // key matches the :userid in the route
+  return <div>User: {userid}</div>
+}
+```
+- `useParams()` returns an **object** of all URL params → destructure it.
+- The key **must match** the route's segment name exactly: `:userid` → `params.userid`.
+- Visiting `/user/akshat` renders *"User: akshat"*.
+
+This is how detail pages work — one component serves every user/product/post, with the
+URL supplying the id.
+
+> There's no `<Link>` to this route in the Header, so reach it by typing
+> `/user/<anything>` in the address bar.
+
+---
+
+## 29. Loaders & useLoaderData
+
+React Router can fetch data **before** the component renders, replacing the
+`useEffect` + `useState` fetch pattern from Section 19.
+
+### The old way (commented out in `Github.jsx`)
+```jsx
+const [data, setData] = useState([])
+useEffect(() => {
+  fetch('https://api.github.com/users/Akshats-git')
+    .then(response => response.json())
+    .then(data => setData(data))
+}, [])
+```
+This renders **first** with empty data, *then* fetches, *then* re-renders — a visible
+flash of empty UI.
+
+### The loader way
+```jsx
+// 1. Export a loader — a plain async function that returns data
+export const githubInfoLoader = async () => {
+  const response = await fetch('https://api.github.com/users/Akshats-git')
+  return response.json()
+}
+```
+```jsx
+// 2. Attach it to the route (main.jsx)
+<Route loader={githubInfoLoader} path='github' element={<Github />} />
+```
+```jsx
+// 3. Read it in the component — no useState, no useEffect
+import { useLoaderData } from 'react-router-dom'
+
+function Github() {
+  const data = useLoaderData()
+  return (
+    <div>
+      Github followers: {data.followers}
+      <img src={data.avatar_url} alt="Git picture" width={300} />
+    </div>
+  )
+}
+```
+
+**Why loaders are better:**
+- The router **waits** for the loader to resolve before rendering — the component always
+  has its data, so **no empty-state flash** and no loading flicker.
+- Fetching starts **as soon as navigation begins**, not after render — it's faster.
+- The component gets **simpler**: no `useState`, no `useEffect`, no loading state.
+- `async/await` here instead of `.then()` chains — cleaner for sequential steps.
+
+> Note `Github.jsx` has **two exports**: `export default Github` (the component) and
+> `export const githubInfoLoader` (a named export). That's why `main.jsx` imports it as
+> `import Github, { githubInfoLoader } from './components/Github/Github.jsx'` — default
+> and named in one line (Section 23).
+
+> ⚠️ The GitHub API allows only **60 unauthenticated requests per hour** per IP. If the
+> avatar/follower count stops appearing, you may be **rate-limited** — check the Network
+> tab for a **403** (the same "check the network first" lesson from Section 19).
+
+---
+
+## 30. Rules & Gotchas (Quick Reference)
 
 | Rule | Detail |
 |------|--------|
@@ -1117,8 +1370,15 @@ custom ones):
 | Async state | State updates aren't instant — `console.log` right after a setter shows the **old** value. |
 | `fetch` + 404 | `fetch` does **not** throw on 404 — always add `.catch()` or errors disappear silently. |
 | Empty data? | Check the Network tab first — tutorial API URLs go stale (this app's did). |
+| Router setup | `createBrowserRouter(...)` + `<RouterProvider router={router} />` in `main.jsx`. |
+| Nested paths | Child paths are **relative** — no leading `/`, or nesting breaks. |
+| `<Outlet />` | Placeholder in a layout where the matched child route renders. |
+| Never `<a>` internally | Use `<Link to="...">` — an `<a>` reloads the page and wipes state. |
+| `NavLink` | `Link` + `isActive`; `className` can be a function: `({isActive}) => ...`. |
+| Dynamic routes | `path='user/:userid'` → read with `const { userid } = useParams()`. |
+| Loaders | `loader={fn}` on a route + `useLoaderData()` — data ready **before** render, no flash. |
 
 ---
 
-*More sections will be appended as the course continues (useMemo, Context API,
-conditional rendering, React Router, Redux Toolkit, etc.).*
+*More sections will be appended as the course continues (Context API, useMemo,
+conditional rendering, Redux Toolkit, etc.).*
