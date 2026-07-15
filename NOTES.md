@@ -38,7 +38,10 @@
 31. [The Context API](#31-the-context-api)
 32. [The children Prop](#32-the-children-prop)
 33. [Conditional Rendering](#33-conditional-rendering)
-34. [Rules & Gotchas (Quick Reference)](#34-rules--gotchas-quick-reference)
+34. [Context, Refined: Default Values & a Custom Hook](#34-context-refined-default-values--a-custom-hook)
+35. [Side Effects on the DOM (Dark Mode)](#35-side-effects-on-the-dom-dark-mode)
+36. [Tailwind Dark Mode & the peer Pattern](#36-tailwind-dark-mode--the-peer-pattern)
+37. [Rules & Gotchas (Quick Reference)](#37-rules--gotchas-quick-reference)
 
 ---
 
@@ -1528,7 +1531,184 @@ and it doubles as a **guard**: the line below is only reached when `user` exists
 
 ---
 
-## 34. Rules & Gotchas (Quick Reference)
+## 34. Context, Refined: Default Values & a Custom Hook
+
+Sections 34–36 map to the `9.ThemeSwitcher/` app. It's **Context again** (Section 31), but
+written the way you'd write it in a real project. Compare the two — same feature, better
+ergonomics.
+
+### The whole context in one file — `contexts/theme.js`
+```js
+import { createContext, useContext } from "react"
+
+// 1. Create the context WITH a default shape
+export const ThemeContext = createContext({
+    themeMode: "light",
+    darkTheme: () => {},
+    lightTheme: () => {},
+})
+
+// 2. Re-export the Provider under a friendlier name
+export const ThemeProvider = ThemeContext.Provider
+
+// 3. A custom hook so consumers never touch useContext directly
+export default function useTheme() {
+    return useContext(ThemeContext)
+}
+```
+
+### Three upgrades over project 8
+
+**1. `createContext(defaultValue)` — a default shape.**
+Project 8 used bare `createContext()`, so the value is `undefined` if a component isn't
+wrapped in a provider — meaning `const { user } = useContext(...)` **crashes**. Passing a
+default gives a safe fallback and, just as usefully, **documents the context's shape**:
+you can read this file and instantly see what's inside. The empty functions (`() => {}`)
+are **no-op placeholders** — real implementations come from the provider.
+
+**2. `export const ThemeProvider = ThemeContext.Provider`.**
+A small alias so `App` writes `<ThemeProvider value={...}>` instead of
+`<ThemeContext.Provider value={...}>`. Note this exports the Provider **directly** — there's
+no wrapper component like project 8's `UserContextProvider`, so **the state lives in
+`App`** instead of inside a provider component. Both patterns are valid.
+
+**3. `useTheme()` — a custom hook wrapping `useContext`.** ⭐
+This is the big one, and it combines Section 19 (custom hooks) with Section 31 (context):
+
+```jsx
+// Without the custom hook (project 8's style) — every consumer needs 2 imports:
+import { useContext } from 'react'
+import ThemeContext from '../contexts/theme'
+const { themeMode } = useContext(ThemeContext)
+
+// With the custom hook — one import, no useContext in sight:
+import useTheme from '../contexts/theme'
+const { themeMode, lightTheme, darkTheme } = useTheme()
+```
+- Consumers **don't need to know** the context object even exists.
+- If the implementation changes later, you edit **one file**, not every consumer.
+- It's a legal custom hook because it starts with `use` and calls a hook (Section 24).
+
+**This is the standard, production pattern:** context + provider + a `useX()` hook,
+all in one file.
+
+### Functions in the context value, not the setter
+```jsx
+// App.jsx — state lives here
+const [themeMode, setThemeMode] = useState("light")
+
+const lightTheme = () => setThemeMode("light")
+const darkTheme  = () => setThemeMode("dark")
+
+<ThemeProvider value={{ themeMode, lightTheme, darkTheme }}>
+```
+Project 8 shared the raw setter (`setUser`); here `App` shares **named action functions**
+instead. Consumers call `darkTheme()` — expressing **intent** — rather than
+`setThemeMode("dark")` and needing to know the valid string values. It's a cleaner API and
+keeps the state's shape private.
+
+---
+
+## 35. Side Effects on the DOM (Dark Mode)
+
+React owns the `#root` div — but the `<html>` element is **outside** it. To toggle a class
+there, you reach for the DOM directly, and that's a **side effect** → `useEffect`
+(Section 15):
+
+```jsx
+useEffect(() => {
+  document.querySelector('html').classList.remove("light", "dark")
+  document.querySelector('html').classList.add(themeMode)
+}, [themeMode])
+```
+
+- **Runs on mount and whenever `themeMode` changes** — thanks to the `[themeMode]` dep.
+- **`remove` before `add`** matters: without it the classes would pile up
+  (`class="light dark"`) and the last one wouldn't reliably win. Clean up, then apply.
+- This is a **legitimate** use of direct DOM manipulation. React can't render `<html>`, so
+  an effect is exactly the right escape hatch.
+
+**The full data flow, end to end:**
+```
+click toggle → onChangeBtn → darkTheme() → setThemeMode("dark")
+  → App re-renders → useEffect fires (themeMode changed)
+  → <html class="dark"> → every `dark:` Tailwind class activates
+```
+State drives a DOM class, and CSS does the rest — no component needs to know about styling.
+
+---
+
+## 36. Tailwind Dark Mode & the peer Pattern
+
+### Class-based dark mode
+```js
+// tailwind.config.js
+export default {
+  content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
+  darkMode: "class",     // ← toggle dark mode via a CSS class, not the OS setting
+  ...
+}
+```
+- **`darkMode: "class"`** tells Tailwind that `dark:` variants apply when a **`.dark`
+  class** is present on an ancestor (here, `<html>`).
+- The default is `"media"`, which follows the **OS** setting (`prefers-color-scheme`) and
+  **can't be toggled by the user** — which is why this app overrides it.
+- Then any `dark:` prefixed class activates automatically:
+  ```jsx
+  <div className="bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
+  ```
+  Two states, one element, zero JavaScript.
+
+### The controlled toggle
+```jsx
+const { themeMode, lightTheme, darkTheme } = useTheme()
+
+const onChangeBtn = (e) => {
+    const darkModeStatus = e.currentTarget.checked
+    if (darkModeStatus) darkTheme()
+    else lightTheme()
+}
+
+<input type="checkbox" className="sr-only peer"
+       onChange={onChangeBtn}
+       checked={themeMode === "dark"} />
+```
+- **`checked={themeMode === "dark"}`** — a controlled input (Section 18) whose state comes
+  from **context**, converting the theme string into the checkbox's boolean.
+- **`e.currentTarget.checked`** reads the new checked state. (`currentTarget` is the
+  element the handler is attached to; `target` is what was actually clicked — they differ
+  when the click lands on a child.)
+
+### `sr-only` + `peer` — styling a custom switch
+The real checkbox is **hidden but still functional**, and a `<div>` is styled to look like
+a switch:
+- **`sr-only`** hides it visually while keeping it in the accessibility tree — screen
+  readers and keyboards still work. (Better than `hidden`, which removes it entirely.)
+- **`peer`** marks it as a sibling that other elements can react to. The next div then uses
+  **`peer-checked:`** and **`peer-focus:`** to restyle itself based on the checkbox's
+  state:
+  ```jsx
+  <div className="w-11 h-6 bg-gray-200 peer-checked:bg-blue-600
+                  after:h-5 after:w-5 peer-checked:after:translate-x-full ..." />
+  ```
+  `after:` styles the CSS `::after` pseudo-element (the sliding knob), and
+  `peer-checked:after:translate-x-full` slides it right when checked.
+- Wrapping both in a `<label>` makes clicking anywhere on the switch toggle the checkbox.
+
+**Takeaway:** a native checkbox provides the behavior and accessibility for free; CSS
+makes it look like anything you want.
+
+> **Tailwind v4 note:** `darkMode: "class"` is **v3** config. v4 drops `tailwind.config.js`
+> (Section 13) and declares this in CSS instead:
+> ```css
+> @import "tailwindcss";
+> @custom-variant dark (&:where(.dark, .dark *));
+> ```
+> The `dark:` classes in your JSX stay exactly the same.
+
+---
+
+## 37. Rules & Gotchas (Quick Reference)
 
 | Rule | Detail |
 |------|--------|
@@ -1587,8 +1767,16 @@ and it doubles as a **guard**: the line below is only reached when `user` exists
 | `children` | Automatic prop holding whatever is nested inside a component's tags. |
 | Conditional render | Early return, `cond && <X />`, or `cond ? <A /> : <B />`. |
 | `&&` renders `0` | `{arr.length && <X/>}` prints `0` — use `{arr.length > 0 && <X/>}`. |
+| Context default | `createContext({...})` documents the shape + avoids `undefined` crashes. |
+| `useX()` wrapper | Wrap `useContext` in a custom hook — consumers import one thing, not two. |
+| Share actions | Expose `darkTheme()` rather than `setThemeMode` — intent, not implementation. |
+| DOM outside `#root` | `<html>`/`<body>` need `useEffect` + `classList` — a valid escape hatch. |
+| Class hygiene | `classList.remove(...)` **then** `add(...)`, or classes pile up. |
+| Tailwind dark mode | v3: `darkMode: "class"`; v4: `@custom-variant dark (&:where(.dark, .dark *));`. |
+| `sr-only` + `peer` | Hide a real input accessibly; style a sibling with `peer-checked:`. |
+| `currentTarget` | The element the handler is on; `target` is what was clicked. |
 
 ---
 
 *More sections will be appended as the course continues (useMemo, useReducer,
-Redux Toolkit, memo, custom hooks, etc.).*
+Redux Toolkit, memo, etc.).*
