@@ -23,7 +23,13 @@
 16. [The useCallback Hook (Memoizing Functions)](#16-the-usecallback-hook-memoizing-functions)
 17. [The useRef Hook (Referencing DOM Nodes)](#17-the-useref-hook-referencing-dom-nodes)
 18. [Controlled Inputs & Reading Form Values](#18-controlled-inputs--reading-form-values)
-19. [Rules & Gotchas (Quick Reference)](#19-rules--gotchas-quick-reference)
+19. [Custom Hooks & Fetching Data from an API](#19-custom-hooks--fetching-data-from-an-api)
+20. [Rendering Lists with .map() & Keys](#20-rendering-lists-with-map--keys)
+21. [The useId Hook](#21-the-useid-hook)
+22. [Forms: onSubmit & preventDefault](#22-forms-onsubmit--preventdefault)
+23. [Callback Props & Barrel Exports](#23-callback-props--barrel-exports)
+24. [Rules of Hooks](#24-rules-of-hooks)
+25. [Rules & Gotchas (Quick Reference)](#25-rules--gotchas-quick-reference)
 
 ---
 
@@ -782,7 +788,292 @@ it. That's the whole app wired together: **state + effect + refs + controlled in
 
 ---
 
-## 19. Rules & Gotchas (Quick Reference)
+## 19. Custom Hooks & Fetching Data from an API
+
+Sections 19–23 map to the `6.CurrencyConverter/` app. This is the first project with a
+**real folder structure** (`components/`, `hooks/`) and the first that talks to an **API**.
+
+A **custom hook** is just a **normal JavaScript function whose name starts with `use`**
+and that calls other hooks inside it. It's the way to **extract reusable stateful logic**
+out of a component so the component stays focused on the UI.
+
+### The custom hook — `hooks/useCurrencyInfo.js`
+
+```js
+import { useEffect, useState } from "react"
+
+function useCurrencyInfo(currency) {
+  const [data, setData] = useState({})
+
+  useEffect(() => {
+    fetch(`https://cdn.jsdelivr.net/gh/fawazahmed0/currency-api@1/latest/currencies/${currency}.json`)
+      .then((res) => res.json())        // parse the JSON response
+      .then((res) => setData(res[currency]))   // store just the rates object
+  }, [currency])                        // re-fetch whenever the currency changes
+
+  return data                           // hand the data back to the component
+}
+
+export default useCurrencyInfo
+```
+
+**What's happening:**
+1. The hook owns its own `useState` — each component using it gets its **own** copy.
+2. `useEffect` with `[currency]` fetches **on mount** and again **whenever `currency`
+   changes** — so picking a different "from" currency automatically re-fetches rates.
+3. `fetch()` returns a **Promise** → `.then(res => res.json())` parses the body →
+   the second `.then` saves it to state.
+4. The hook **returns** the data. Setting state inside the hook re-renders the component
+   that uses it — this is normal hook behavior.
+
+### Using it — one clean line in `App.jsx`
+```jsx
+const currencyInfo = useCurrencyInfo(from)   // all the fetching complexity is hidden
+const options = Object.keys(currencyInfo)    // ["usd", "inr", "eur", ...] for the dropdown
+```
+`Object.keys()` turns the rates object (`{ inr: 83.2, eur: 0.92, ... }`) into an array of
+currency codes to render in the `<select>`.
+
+**Why custom hooks are great:**
+- **Reusable** — any component can call `useCurrencyInfo(...)`.
+- **Separation of concerns** — `App` renders UI; the hook handles data fetching.
+- They can use `useState`, `useEffect`, and other hooks freely.
+- **State is not shared** between components using the hook — each call is independent.
+
+> **Initial state matters:** `useState({})` starts as an **empty object**, not `undefined`.
+> The first render happens **before** the fetch finishes, so `Object.keys(currencyInfo)`
+> must not blow up — an empty object safely gives `[]`. (A real app would also track
+> `loading` / `error` states.)
+
+> ⚠️ **`console.log(data)` inside the hook logs the *old* value.** State updates are
+> asynchronous — `data` in that render is a snapshot, so the log always trails one render
+> behind. It's not a bug in the data, just a common source of confusion when debugging.
+
+### 🐛 Debugging story: the empty dropdown
+
+The currency dropdown first rendered **completely empty**. Working backwards:
+`options` was `[]` → so `Object.keys(currencyInfo)` had nothing → so `currencyInfo` was
+still the initial `{}` → so **`setData` never ran** → so the **fetch failed**.
+
+The cause: the API URL used in the course video is **dead**. The old
+`.../gh/fawazahmed0/currency-api@1/latest/currencies/usd.json` endpoint now returns
+**404** — that version of the API was retired. The working URL is:
+
+```js
+fetch(`https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/${currency}.json`)
+```
+
+**Lessons from this:**
+- **APIs used in tutorials go stale.** If data never shows up, check the **Network tab**
+  (or paste the URL in a browser) *before* suspecting your React code.
+- **A failed `fetch` is silent by default.** `fetch` does **not** throw on a 404 — it
+  resolves with `res.ok === false`. Here the 404 body was plain text, so `res.json()`
+  rejected, and with no `.catch()` the error vanished as an unhandled promise rejection.
+  Always add a `.catch()`:
+  ```js
+  fetch(url)
+    .then((res) => res.json())
+    .then((res) => setData(res[currency]))
+    .catch((err) => console.error("Failed to fetch currency rates:", err))
+  ```
+- **An empty initial state hides failures.** `useState({})` meant the UI rendered an empty
+  dropdown instead of crashing — safer, but it made the failure invisible. This is exactly
+  why real apps track `loading` and `error` state alongside the data.
+
+---
+
+## 20. Rendering Lists with .map() & Keys
+
+To render an array as UI, use JavaScript's **`.map()`** inside `{ }` to turn each item
+into a JSX element:
+
+```jsx
+{currencyOptions.map((currency) => (
+  <option key={currency} value={currency}>
+    {currency}
+  </option>
+))}
+```
+
+- `.map()` is used (not `forEach`) because it **returns a new array** — of JSX elements —
+  and React can render an array of elements.
+- Wrap it in `{ }` since it's a JavaScript expression inside JSX.
+
+### The `key` prop
+**Every item in a list needs a unique `key`.** This is the same `key` from the diffing
+section (Section 5): it lets React **match** items between the old and new virtual trees,
+so it can reorder/update them instead of re-creating them.
+
+- The key must be **unique among siblings** and **stable** across renders.
+- Here `key={currency}` works because currency codes are unique.
+- **Avoid the array index as a key** when the list can reorder, filter, or have items
+  inserted/removed — it causes subtle bugs and wasted re-renders.
+- Missing keys → React logs a *"Each child in a list should have a unique key"* warning.
+
+---
+
+## 21. The useId Hook
+
+`useId` generates a **unique, stable ID string** — useful for wiring an input to its
+label without hard-coding IDs that could collide when a component is reused.
+
+```jsx
+import { useId } from 'react'
+
+function InputBox({ label, ... }) {
+  const amountInputId = useId()
+  return (
+    <>
+      <label htmlFor={amountInputId}>{label}</label>
+      <input id={amountInputId} ... />
+    </>
+  )
+}
+```
+
+- `htmlFor` + matching `id` links the label to the input (clicking the label focuses it —
+  good accessibility).
+- **Why not just `id="amount"`?** `InputBox` is rendered **twice** (From and To) — a
+  hard-coded ID would be **duplicated** in the DOM, which is invalid. `useId` gives each
+  instance its own ID automatically.
+- The ID is **stable across re-renders** and safe with server rendering.
+
+> **Not for list keys:** `useId` is for DOM IDs, not for the `key` prop in lists.
+
+---
+
+## 22. Forms: onSubmit & preventDefault
+
+```jsx
+<form
+  onSubmit={(e) => {
+    e.preventDefault();   // stop the browser's default page reload
+    convert()
+  }}
+>
+  ...
+  <button type="submit">Convert {from.toUpperCase()} to {to.toUpperCase()}</button>
+</form>
+```
+
+- A `<form>` submits when a **`type="submit"`** button inside it is clicked (or Enter is
+  pressed in a field).
+- **`e.preventDefault()` is essential.** By default the browser submits the form and
+  **reloads the page**, which would wipe all React state. Preventing it keeps everything
+  in JavaScript.
+- `e` is React's **synthetic event** — a cross-browser wrapper around the native event
+  with the same API (`preventDefault`, `target`, etc.).
+
+### `type="button"` vs `type="submit"`
+```jsx
+<button type="button" onClick={swap}>swap</button>   // does NOT submit the form
+```
+Inside a `<form>`, a button **defaults to `type="submit"`**. The swap button explicitly
+sets `type="button"` so clicking it runs `swap` **without** submitting the form — an easy
+bug to hit if you forget it.
+
+---
+
+## 23. Callback Props & Barrel Exports
+
+### Callback props — talking back to the parent
+Props flow **down** (Section 12), so how does a child send data **up**? The parent passes
+a **function** as a prop, and the child **calls** it:
+
+```jsx
+// Parent (App.jsx) — passes functions down
+<InputBox
+  label="From"
+  amount={amount}
+  currencyOptions={options}
+  selectCurrency={from}
+  onAmountChange={(amount) => setAmount(amount)}
+  onCurrencyChange={(currency) => setFrom(currency)}
+/>
+```
+```jsx
+// Child (InputBox.jsx) — calls them when something changes
+<input
+  value={amount}
+  onChange={(e) => onAmountChange && onAmountChange(Number(e.target.value))}
+/>
+<select
+  value={selectCurrency}
+  onChange={(e) => onCurrencyChange && onCurrencyChange(e.target.value)}
+>
+```
+
+- The child never modifies props — it just **reports** the change; the **parent owns the
+  state** and decides what to do. This is **"lifting state up"**.
+- `onAmountChange && onAmountChange(...)` guards against the prop not being passed
+  (optional callback), so the child doesn't crash.
+- `Number(e.target.value)` converts the input's **string** value to a number — input
+  values are **always strings**, even for `type="number"`.
+
+### Reusable component design
+`InputBox` is a good example of a flexible component — defaults + toggles:
+```jsx
+function InputBox({
+  label, amount, onAmountChange, onCurrencyChange,
+  currencyOptions = [],        // default: empty list
+  selectCurrency = "usd",
+  amountDisable = false,       // flags to disable parts of the UI
+  currencyDisable = false,
+  className = "",              // let the parent add extra styling
+}) {
+```
+- `amountDisable` is passed as a bare prop (`<InputBox amountDisable />`) — a JSX prop
+  with **no value defaults to `true`**. That makes the "To" box read-only.
+- Accepting a `className` prop and merging it with a template literal
+  (`` className={`bg-white p-3 ... ${className}`} ``) lets the parent customize styles.
+
+### Barrel exports — `components/index.js`
+```js
+import InputBox from './InputBox'
+export { InputBox }
+```
+This "barrel" file re-exports components so imports get shorter and tidier:
+```jsx
+import { InputBox } from './components'          // ✅ with the barrel file
+import InputBox from './components/InputBox'     // without it
+```
+With more components you'd add them to the same file and import several in one line.
+Note the **named** import `{ InputBox }` here vs. the **default** import
+`import useCurrencyInfo from './hooks/useCurrencyInfo'`.
+
+> 🐛 **Bugs that were in this app** (fixed — but good debugging practice to understand):
+> - The **"To"** `InputBox` had `selectCurrency={from}` — it should be `to`, so the
+>   dropdown showed the wrong currency. **Copy-paste bugs like this are silent:** the prop
+>   name is correct and it renders fine, it's just wired to the wrong state variable.
+> - The **"From"** box's `onCurrencyChange={(currency) => setAmount(amount)}` ignored the
+>   `currency` argument and re-set the amount to itself → changing the "From" dropdown did
+>   **nothing**. Fixed to `setFrom(currency)`.
+
+---
+
+## 24. Rules of Hooks
+
+Now that several hooks are in play, the rules that apply to **all** of them (including
+custom ones):
+
+1. **Only call hooks at the top level.** Never inside loops, conditions, or nested
+   functions. React tracks hooks **by call order**, so the order must be identical on
+   every render.
+   ```jsx
+   if (something) { const [x, setX] = useState(0) }   // ❌ breaks the order
+   const [x, setX] = useState(0)                      // ✅ top level
+   ```
+2. **Only call hooks from React functions** — a component, or another custom hook. Not
+   from plain JS functions or event handlers.
+3. **Custom hook names must start with `use`.** This is how React (and the ESLint plugin)
+   knows to apply these rules — `useCurrencyInfo` ✅, `currencyInfo` ❌.
+
+> `eslint-plugin-react-hooks` (already in these projects' `package.json`) enforces rules
+> 1 and 2 and warns about missing `useEffect` dependencies.
+
+---
+
+## 25. Rules & Gotchas (Quick Reference)
 
 | Rule | Detail |
 |------|--------|
@@ -813,8 +1104,21 @@ it. That's the whole app wired together: **state + effect + refs + controlled in
 | ref → DOM | `const r = useRef(null)` → `ref={r}` → use `r.current` (guard with `?.`). |
 | Controlled input | `value={state}` + `onChange` — React state is the source of truth. |
 | `value` + `readOnly` | A controlled `value` with no `onChange` needs `readOnly` to silence React's warning. |
+| Custom hooks | A `use`-prefixed function that calls hooks; extracts reusable stateful logic. |
+| Rules of Hooks | Top level only (never in loops/conditions), only from React functions, name starts with `use`. |
+| Lists | Render arrays with `.map()`; needs a unique, stable `key` — avoid the index. |
+| `useId` | Unique DOM ids for label/input pairs when a component is reused. Not for list keys. |
+| Forms | `onSubmit` + **`e.preventDefault()`** or the page reloads and state is lost. |
+| Button type | Buttons in a form default to `type="submit"`; use `type="button"` to avoid submitting. |
+| Lifting state up | Child calls a callback prop (`onChange`-style); the **parent** owns the state. |
+| Input values | Always strings — convert with `Number(e.target.value)` when you need a number. |
+| Bare prop = true | `<InputBox amountDisable />` is the same as `amountDisable={true}`. |
+| Barrel exports | `components/index.js` re-exports so you can `import { X } from './components'`. |
+| Async state | State updates aren't instant — `console.log` right after a setter shows the **old** value. |
+| `fetch` + 404 | `fetch` does **not** throw on 404 — always add `.catch()` or errors disappear silently. |
+| Empty data? | Check the Network tab first — tutorial API URLs go stale (this app's did). |
 
 ---
 
-*More sections will be appended as the course continues (custom hooks, useMemo,
-Context API, conditional rendering, lists & keys, React Router, etc.).*
+*More sections will be appended as the course continues (useMemo, Context API,
+conditional rendering, React Router, Redux Toolkit, etc.).*
