@@ -34,7 +34,11 @@
 27. [Navigation: Link & NavLink](#27-navigation-link--navlink)
 28. [Dynamic Routes & useParams](#28-dynamic-routes--useparams)
 29. [Loaders & useLoaderData](#29-loaders--useloaderdata)
-30. [Rules & Gotchas (Quick Reference)](#30-rules--gotchas-quick-reference)
+30. [Prop Drilling: The Problem Context Solves](#30-prop-drilling-the-problem-context-solves)
+31. [The Context API](#31-the-context-api)
+32. [The children Prop](#32-the-children-prop)
+33. [Conditional Rendering](#33-conditional-rendering)
+34. [Rules & Gotchas (Quick Reference)](#34-rules--gotchas-quick-reference)
 
 ---
 
@@ -1326,7 +1330,205 @@ function Github() {
 
 ---
 
-## 30. Rules & Gotchas (Quick Reference)
+## 30. Prop Drilling: The Problem Context Solves
+
+Sections 30–33 map to the `8.MiniContext/` app. (Like project 7, it was scaffolded on
+React 18 / Vite 4 / ESLint 8 and upgraded to **React 19 / Vite 8 / flat ESLint config** to
+match the rest of the repo — no code changes were needed, the Context API is identical.)
+
+Props flow **one level at a time**: parent → child (Section 12). But what if a deeply
+nested component needs data from the top? You'd have to pass it through **every**
+component in between:
+
+```jsx
+<App user={user}>                    // owns the state
+  <Layout user={user}>               // doesn't use it — just passing through
+    <Sidebar user={user}>            // doesn't use it either
+      <Profile user={user} />        // ← finally, the one that needs it
+```
+
+This is **prop drilling** — and it's painful:
+- Middle components receive props they **don't care about**, just to hand them down.
+- Adding one new value means **editing every layer**.
+- Components become **hard to reuse** — they're coupled to props they never use.
+
+**Context** solves this: put the data in **one place** and let any component **reach in
+and grab it directly**, no matter how deep — skipping every layer in between.
+
+> **Not a replacement for props.** Props are still the right default for parent → child.
+> Reach for Context only for **"global"** data that many components at different depths
+> need: the logged-in user, a theme, a language setting.
+
+---
+
+## 31. The Context API
+
+Context has **three pieces**: create it, provide it, consume it.
+
+### 1. Create the context — `context/UserContext.js`
+```js
+import React from 'react'
+
+const UserContext = React.createContext()
+
+export default UserContext
+```
+`createContext()` makes a context object. Think of it as an empty **box** that data will
+be put into. (Plain `.js` — no JSX here.)
+
+### 2. Provide the value — `context/UserContextProvider.jsx`
+```jsx
+import React from "react"
+import UserContext from "./UserContext"
+
+const UserContextProvider = ({ children }) => {
+  const [user, setUser] = React.useState(null)   // the state lives HERE
+
+  return (
+    <UserContext.Provider value={{ user, setUser }}>
+      {children}
+    </UserContext.Provider>
+  )
+}
+
+export default UserContextProvider
+```
+- Every context has a **`.Provider`** component. Anything rendered **inside** it can read
+  the context.
+- The **`value`** prop is what gets shared. Here it's an object holding **both** the state
+  and its setter — so children can **read** `user` *and* **change** it via `setUser`.
+- Note the **double braces**: `value={{ user, setUser }}` — outer `{}` = JSX expression,
+  inner `{}` = the object literal (same idea as inline styles, Section 14).
+- The state lives in the **provider**, which is why every consumer sees the same value.
+
+**Why a separate provider component?** `createContext` and the state could live in one
+file, but splitting them keeps the context object importable anywhere without dragging
+the state logic along. This "provider component" pattern is very common.
+
+### 3. Wrap the app — `App.jsx`
+```jsx
+function App() {
+  return (
+    <UserContextProvider>       {/* everything inside can access the context */}
+      <h1>React with Chai and share is important</h1>
+      <Login />
+      <Profile />
+    </UserContextProvider>
+  )
+}
+```
+Components **outside** the provider **cannot** see the context — the provider defines the
+scope.
+
+### 4. Consume with `useContext`
+```jsx
+// Login.jsx — writes to the context
+import React, { useState, useContext } from 'react'
+import UserContext from '../context/UserContext'
+
+function Login() {
+  const [username, setUsername] = useState('')   // local state — only Login needs it
+  const [password, setPassword] = useState('')
+  const { setUser } = useContext(UserContext)    // pull the setter out of context
+
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    setUser({ username, password })              // push to the shared context
+  }
+  ...
+}
+```
+```jsx
+// Profile.jsx — reads from the context
+function Profile() {
+  const { user } = useContext(UserContext)       // pull the value out of context
+  if (!user) return <div>please login</div>
+  return <div>Welcome {user.username}</div>
+}
+```
+
+- `useContext(UserContext)` returns whatever the nearest provider passed as `value` —
+  destructure just the part you need.
+- **`Login` and `Profile` are siblings and never talk to each other.** `Login` calls
+  `setUser` → the provider's state changes → **every** consumer re-renders → `Profile`
+  shows the new user. No props were passed between them at all. **That's the payoff.**
+
+### Note the split: local vs shared state
+`username`/`password` stay as **local `useState`** in `Login` — only that component cares
+about the in-progress typing. Only the **submitted** user goes into context. Don't put
+everything in context; keep state as local as it can be.
+
+> **The three steps, summarized:** `createContext()` → wrap in `<X.Provider value={...}>`
+> → read with `useContext(X)`.
+
+> **Modern syntax:** React 19 lets you render the context directly as `<UserContext
+> value={...}>` instead of `<UserContext.Provider value={...}>`. `.Provider` still works
+> and is what you'll see in most code and tutorials.
+
+---
+
+## 32. The children Prop
+
+`children` is a **special, automatic prop**: whatever you nest **inside** a component's
+tags is passed to it as `children`.
+
+```jsx
+const UserContextProvider = ({ children }) => (
+  <UserContext.Provider value={{ user, setUser }}>
+    {children}                 {/* ← renders whatever was nested inside */}
+  </UserContext.Provider>
+)
+```
+```jsx
+<UserContextProvider>
+  <h1>React with Chai...</h1>   {/* ─┐                       */}
+  <Login />                     {/*  ├─ all of this is `children` */}
+  <Profile />                   {/* ─┘                       */}
+</UserContextProvider>
+```
+
+- You don't declare or pass `children` — React fills it in automatically.
+- It makes **wrapper components** possible: providers, layouts, modals, cards — any
+  component that adds behavior around content it doesn't know about in advance.
+- Same idea as React Router's `<Outlet />` (Section 26): a hole for content decided
+  elsewhere. `children` is filled by the **parent**; `Outlet` is filled by the **router**.
+
+---
+
+## 33. Conditional Rendering
+
+Showing different UI depending on state. `Profile` uses the **early return**:
+
+```jsx
+function Profile() {
+  const { user } = useContext(UserContext)
+
+  if (!user) return <div>please login</div>    // guard clause — bail out early
+  return <div>Welcome {user.username}</div>
+}
+```
+`user` starts as `null` (`useState(null)`), so this renders *"please login"* until a login
+happens. The early return is the cleanest option when one branch is a simple fallback —
+and it doubles as a **guard**: the line below is only reached when `user` exists, so
+`user.username` can't crash.
+
+### The other common patterns
+```jsx
+{user && <div>Welcome {user.username}</div>}                   // && — render or nothing
+{user ? <Profile /> : <Login />}                               // ternary — either/or
+```
+- **`&&`** — renders the right side only if the left is truthy. Good for "show it or
+  don't".
+- **Ternary** — picks between two elements. The only way to do an inline if/else in JSX,
+  since `{ }` takes **expressions**, not `if` statements (Section 6).
+
+> ⚠️ **The `&&` number gotcha:** `{items.length && <List />}` renders a literal **`0`** on
+> screen when the array is empty — `0` is falsy, and React renders it. Use
+> `{items.length > 0 && <List />}` to force a real boolean.
+
+---
+
+## 34. Rules & Gotchas (Quick Reference)
 
 | Rule | Detail |
 |------|--------|
@@ -1377,8 +1579,16 @@ function Github() {
 | `NavLink` | `Link` + `isActive`; `className` can be a function: `({isActive}) => ...`. |
 | Dynamic routes | `path='user/:userid'` → read with `const { userid } = useParams()`. |
 | Loaders | `loader={fn}` on a route + `useLoaderData()` — data ready **before** render, no flash. |
+| Prop drilling | Passing props through layers that don't use them — what Context fixes. |
+| Context (3 steps) | `createContext()` → `<X.Provider value={...}>` → `useContext(X)`. |
+| Provider scope | Only components **inside** the provider can read the context. |
+| Share state + setter | `value={{ user, setUser }}` lets consumers both read and update. |
+| Keep state local | Only put genuinely shared data in context (not in-progress form input). |
+| `children` | Automatic prop holding whatever is nested inside a component's tags. |
+| Conditional render | Early return, `cond && <X />`, or `cond ? <A /> : <B />`. |
+| `&&` renders `0` | `{arr.length && <X/>}` prints `0` — use `{arr.length > 0 && <X/>}`. |
 
 ---
 
-*More sections will be appended as the course continues (Context API, useMemo,
-conditional rendering, Redux Toolkit, etc.).*
+*More sections will be appended as the course continues (useMemo, useReducer,
+Redux Toolkit, memo, custom hooks, etc.).*
